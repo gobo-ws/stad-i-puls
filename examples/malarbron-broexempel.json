@@ -1,0 +1,159 @@
+[
+    {
+        "id": "e6280b723003cbfc",
+        "type": "tab",
+        "label": "Broöppning Mälarbron",
+        "disabled": false,
+        "info": "Anropar Södertälje kommuns API för att hämta status för broöppning på Mälarbron.\r\nAv Johan Nilsson, gobo.ws"
+    },
+    {
+        "id": "c7feb81fd34c18cd",
+        "type": "inject",
+        "z": "e6280b723003cbfc",
+        "name": "Skicka förfrågan var 30:e sekund",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "30",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 180,
+        "y": 60,
+        "wires": [
+            [
+                "a2385d6277c00ad2"
+            ]
+        ]
+    },
+    {
+        "id": "a2385d6277c00ad2",
+        "type": "http request",
+        "z": "e6280b723003cbfc",
+        "name": "Anropa API",
+        "method": "GET",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "https://api.sodertalje.se/getbridgestat",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [
+            {
+                "keyType": "other",
+                "keyValue": "User-Agent",
+                "valueType": "other",
+                "valueValue": "Mozilla/5.0"
+            }
+        ],
+        "x": 410,
+        "y": 60,
+        "wires": [
+            [
+                "7e94d17ca71f9467"
+            ]
+        ]
+    },
+    {
+        "id": "7e94d17ca71f9467",
+        "type": "change",
+        "z": "e6280b723003cbfc",
+        "name": "Hämta bro-data",
+        "rules": [
+            {
+                "t": "set",
+                "p": "payload",
+                "pt": "msg",
+                "to": "payload[0]",
+                "tot": "jsonata"
+            }
+        ],
+        "action": "",
+        "property": "",
+        "from": "",
+        "to": "",
+        "reg": false,
+        "x": 580,
+        "y": 60,
+        "wires": [
+            [
+                "c653912356a69ddc"
+            ]
+        ]
+    },
+    {
+        "id": "c653912356a69ddc",
+        "type": "switch",
+        "z": "e6280b723003cbfc",
+        "name": "Status för bron (state)",
+        "property": "payload.state",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "eq",
+                "v": "1",
+                "vt": "num"
+            },
+            {
+                "t": "eq",
+                "v": "0",
+                "vt": "num"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 780,
+        "y": 60,
+        "wires": [
+            [
+                "3308b0f9e8b71938"
+            ],
+            [
+                "eb652f243bfdccec"
+            ]
+        ]
+    },
+    {
+        "id": "3308b0f9e8b71938",
+        "type": "debug",
+        "z": "e6280b723003cbfc",
+        "name": "Uppfälld bro - trigga cue",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1010,
+        "y": 40,
+        "wires": []
+    },
+    {
+        "id": "eb652f243bfdccec",
+        "type": "debug",
+        "z": "e6280b723003cbfc",
+        "name": "Nedfälld bro",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 970,
+        "y": 80,
+        "wires": []
+    }
+]
