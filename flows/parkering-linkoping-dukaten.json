@@ -1,5 +1,7 @@
 [
     {
+        "id": "7c4f703982b089a6",
+        "type": "tab",
         "label": "Parkering Linköping (Dukaten)",
         "disabled": false,
         "info": "Parkering från Linköpings kommun (Dukaten API)\r\nAv Johan Nilsson, gobo.ws",
@@ -310,4 +312,3 @@
         "wires": []
     }
 ]
-
