@@ -1,0 +1,314 @@
+[
+    {
+        "id": "c527253a12fa4e71",
+        "type": "tab",
+        "label": "Parkering Linköping",
+        "disabled": false,
+        "info": "Parkering via Linköpings kommuns API.\r\nAv Johan Nilsson, gobo.ws",
+        "env": []
+    },
+    {
+        "id": "557992d002b84304",
+        "type": "inject",
+        "z": "c527253a12fa4e71",
+        "name": "Skicka förfrågan var 5:e sekund",
+        "props": [],
+        "repeat": "5",
+        "crontab": "",
+        "once": true,
+        "onceDelay": "1",
+        "topic": "",
+        "x": 180,
+        "y": 60,
+        "wires": [
+            [
+                "d21710dec4ae21fa"
+            ]
+        ]
+    },
+    {
+        "id": "d21710dec4ae21fa",
+        "type": "http request",
+        "z": "c527253a12fa4e71",
+        "name": "Hämta parkeringsdata (Linköpings API)",
+        "method": "GET",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "https://stkorspublicserv.linkoping.se/parkeringsapp/ParkeringsappV1.svc/GetParkeringsytaList/0",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 520,
+        "y": 60,
+        "wires": [
+            [
+                "26c764a921f2934f"
+            ]
+        ]
+    },
+    {
+        "id": "26c764a921f2934f",
+        "type": "function",
+        "z": "c527253a12fa4e71",
+        "name": "Beräkna summor och beläggning",
+        "func": "let list = msg.payload.ParkingAreaNewList;\n\nlet totalSpaces = 0;\nlet totalAvailable = 0;\n\nif (Array.isArray(list)) {\n    list.forEach(area => {\n        totalSpaces += area.ParkingSpaces || 0;\n        totalAvailable += area.ParkingSpacesAvailable || 0;\n    });\n}\n\nlet occupancyPercent = totalSpaces > 0\n    ? 100 - ((totalAvailable / totalSpaces) * 100)\n    : 0;\n\noccupancyPercent = Number(occupancyPercent.toFixed(1));\n\nmsg.payload = {\n    totalSpaces: totalSpaces,\n    totalAvailable: totalAvailable,\n    occupancyPercent: occupancyPercent\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 180,
+        "y": 120,
+        "wires": [
+            [
+                "4507b9ae1f7fbeb1"
+            ]
+        ]
+    },
+    {
+        "id": "4507b9ae1f7fbeb1",
+        "type": "function",
+        "z": "c527253a12fa4e71",
+        "name": "Beräkna förändring (ökning/minskning)",
+        "func": "let current = msg.payload.totalAvailable;\nlet prev = flow.get(\"prevAvailable\");\n\nif (prev === undefined) {\n    flow.set(\"prevAvailable\", current);\n    return null;\n}\n\nlet diff = current - prev;\nflow.set(\"prevAvailable\", current);\nmsg.diff = diff;\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 490,
+        "y": 120,
+        "wires": [
+            [
+                "e0fca5e9098b75bc",
+                "12bc9e2660c6548f"
+            ]
+        ]
+    },
+    {
+        "id": "e0fca5e9098b75bc",
+        "type": "switch",
+        "z": "c527253a12fa4e71",
+        "name": "Ökning eller minskning?",
+        "property": "diff",
+        "propertyType": "msg",
+        "rules": [
+            {
+                "t": "gt",
+                "v": "0",
+                "vt": "num"
+            },
+            {
+                "t": "lt",
+                "v": "0",
+                "vt": "num"
+            }
+        ],
+        "checkall": "true",
+        "repair": false,
+        "outputs": 2,
+        "x": 150,
+        "y": 180,
+        "wires": [
+            [
+                "44550d391b499a05"
+            ],
+            [
+                "be879259ae79eadf"
+            ]
+        ]
+    },
+    {
+        "id": "44550d391b499a05",
+        "type": "function",
+        "z": "c527253a12fa4e71",
+        "name": "DMX grön puls (ökning)",
+        "func": "let universe = 4;\nlet channels = 30;\n\nlet dmxArray = Array(channels).fill(0);\ndmxArray[0] = 100;\ndmxArray[1] = 0;\ndmxArray[2] = 255;\ndmxArray[3] = 0;\n\nmsg.payload = { u: universe, d: dmxArray.join(\",\") };\nmsg.headers = {\"Content-Type\": \"application/x-www-form-urlencoded\"};\n\nlet offArray = Array(channels).fill(0);\nmsg.offPayload = { u: universe, d: offArray.join(\",\") };\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 180,
+        "wires": [
+            [
+                "1c27be6d03f4e22b",
+                "488bbe57e292f7d4",
+                "168459293bc5d837"
+            ]
+        ]
+    },
+    {
+        "id": "be879259ae79eadf",
+        "type": "function",
+        "z": "c527253a12fa4e71",
+        "name": "DMX röd puls (minskning)",
+        "func": "let universe = 4;\nlet channels = 30;\n\nlet dmxArray = Array(channels).fill(0);\ndmxArray[0] = 100;\ndmxArray[1] = 255;\ndmxArray[2] = 0;\ndmxArray[3] = 0;\n\nmsg.payload = { u: universe, d: dmxArray.join(\",\") };\nmsg.headers = {\"Content-Type\": \"application/x-www-form-urlencoded\"};\n\nlet offArray = Array(channels).fill(0);\nmsg.offPayload = { u: universe, d: offArray.join(\",\") };\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 410,
+        "y": 220,
+        "wires": [
+            [
+                "1c27be6d03f4e22b",
+                "5c2c92f77d1cf7b4",
+                "e92cca1949616912"
+            ]
+        ]
+    },
+    {
+        "id": "5b1c88a2abf2b58d",
+        "type": "function",
+        "z": "c527253a12fa4e71",
+        "name": "DMX av",
+        "func": "msg.payload = msg.offPayload;\nmsg.headers = {\"Content-Type\": \"application/x-www-form-urlencoded\"};\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 800,
+        "y": 240,
+        "wires": [
+            [
+                "1c27be6d03f4e22b"
+            ]
+        ]
+    },
+    {
+        "id": "1c27be6d03f4e22b",
+        "type": "http request",
+        "z": "c527253a12fa4e71",
+        "name": "Skicka till OLA",
+        "method": "POST",
+        "ret": "txt",
+        "paytoqs": "ignore",
+        "url": "http://localhost:9090/set_dmx",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 820,
+        "y": 300,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "488bbe57e292f7d4",
+        "type": "delay",
+        "z": "c527253a12fa4e71",
+        "name": "Fördröj 3 s",
+        "pauseType": "delay",
+        "timeout": "3",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 770,
+        "y": 180,
+        "wires": [
+            [
+                "5b1c88a2abf2b58d"
+            ]
+        ]
+    },
+    {
+        "id": "5c2c92f77d1cf7b4",
+        "type": "delay",
+        "z": "c527253a12fa4e71",
+        "name": "Fördröj 3 s",
+        "pauseType": "delay",
+        "timeout": "3",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 630,
+        "y": 260,
+        "wires": [
+            [
+                "5b1c88a2abf2b58d"
+            ]
+        ]
+    },
+    {
+        "id": "12bc9e2660c6548f",
+        "type": "debug",
+        "z": "c527253a12fa4e71",
+        "name": "Status",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 710,
+        "y": 120,
+        "wires": []
+    },
+    {
+        "id": "168459293bc5d837",
+        "type": "debug",
+        "z": "c527253a12fa4e71",
+        "name": "Grön",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 610,
+        "y": 180,
+        "wires": []
+    },
+    {
+        "id": "e92cca1949616912",
+        "type": "debug",
+        "z": "c527253a12fa4e71",
+        "name": "Röd",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 610,
+        "y": 220,
+        "wires": []
+    }
+]
