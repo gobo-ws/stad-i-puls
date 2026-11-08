@@ -1,0 +1,342 @@
+[
+    {
+        "id": "tv_tab",
+        "type": "tab",
+        "label": "Tågankomst Trafikverket (SSE)",
+        "disabled": false,
+        "info": "Tågankomster via SSE-streaming från Trafikverket.\nKräver: @parasaurolophus/node-red-eventsource\nMiljövariabel: trafikverket_authkey\nMiljövariabel: trafikverket_station (ex: Kil, Cst, G)\nAv Johan Nilsson, gobo.ws"
+    },
+    {
+        "id": "tv_start_inject",
+        "type": "inject",
+        "z": "tv_tab",
+        "name": "Starta SSE vid deploy (auto)",
+        "props": [
+            {
+                "p": "payload",
+                "v": "start",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 2,
+        "x": 160,
+        "y": 40,
+        "wires": [
+            [
+                "tv_build_request"
+            ]
+        ]
+    },
+    {
+        "id": "tv_build_request",
+        "type": "function",
+        "z": "tv_tab",
+        "name": "Bygg XML-fråga (namespace 2.0)",
+        "func": "const authKey = env.get('trafikverket_authkey') || global.get('authenticationkey');\nconst station  = env.get('trafikverket_station')  || global.get('locationSignature');\n\nif (!authKey) {\n    node.error('SAKNAR API-NYCKEL: Sätt miljövariabel trafikverket_authkey');\n    node.status({ fill: 'red', shape: 'ring', text: 'API-nyckel saknas' });\n    return null;\n}\n\nif (!station) {\n    node.error('SAKNAR STATION: Sätt miljövariabel trafikverket_station');\n    node.status({ fill: 'red', shape: 'ring', text: 'Station saknas' });\n    return null;\n}\n\nglobal.set('tv_sse_state', 'fetching_url');\nglobal.set('tv_error_count', 0);\nglobal.set('tv_station', station);\n\nconst today = new Date().toISOString().split('T')[0];\n\nconst xmlQuery =\n`<REQUEST>\n  <LOGIN authenticationkey=\"${authKey}\" />\n  <QUERY objecttype=\"TrainAnnouncement\"\n         namespace=\"rail.trafficinfo\"\n         schemaversion=\"2.0\"\n         sseurl=\"true\">\n    <FILTER>\n      <AND>\n        <EQ name=\"ActivityType\" value=\"Ankomst\" />\n        <EQ name=\"LocationSignature\" value=\"${station}\" />\n        <EQ name=\"Advertised\" value=\"true\" />\n        <GT name=\"AdvertisedTimeAtLocation\" value=\"${today}T00:00:00\" />\n        <LT name=\"AdvertisedTimeAtLocation\" value=\"${today}T23:59:59\" />\n      </AND>\n    </FILTER>\n    <INCLUDE>AdvertisedTrainIdent</INCLUDE>\n    <INCLUDE>ActivityType</INCLUDE>\n    <INCLUDE>LocationSignature</INCLUDE>\n    <INCLUDE>AdvertisedTimeAtLocation</INCLUDE>\n    <INCLUDE>EstimatedTimeAtLocation</INCLUDE>\n    <INCLUDE>EstimatedTimeIsPreliminary</INCLUDE>\n    <INCLUDE>TimeAtLocation</INCLUDE>\n    <INCLUDE>TrackAtLocation</INCLUDE>\n    <INCLUDE>Canceled</INCLUDE>\n    <INCLUDE>FromLocation</INCLUDE>\n    <INCLUDE>ToLocation</INCLUDE>\n    <INCLUDE>ProductInformation</INCLUDE>\n    <INCLUDE>TechnicalTrainIdent</INCLUDE>\n    <INCLUDE>InformationOwner</INCLUDE>\n  </QUERY>\n</REQUEST>`;\n\nmsg.payload = xmlQuery;\nmsg.headers = { 'Content-Type': 'text/xml; charset=utf-8' };\nmsg.method  = 'POST';\nmsg.url     = 'https://api.trafikinfo.trafikverket.se/v2/data.json';\n\nnode.status({ fill: 'blue', shape: 'ring', text: `Hämtar SSE-URL (${station})...` });\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 480,
+        "y": 40,
+        "wires": [
+            [
+                "tv_http_post"
+            ]
+        ]
+    },
+    {
+        "id": "tv_http_post",
+        "type": "http request",
+        "z": "tv_tab",
+        "name": "POST Trafikverket API",
+        "method": "use",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 740,
+        "y": 40,
+        "wires": [
+            [
+                "tv_parse_sseurl"
+            ]
+        ]
+    },
+    {
+        "id": "tv_parse_sseurl",
+        "type": "function",
+        "z": "tv_tab",
+        "name": "Extrahera SSE-URL",
+        "func": "if (msg.statusCode !== 200) {\n    node.error(`HTTP-fel ${msg.statusCode}: ${JSON.stringify(msg.payload)}`);\n    node.status({ fill: 'red', shape: 'ring', text: `HTTP ${msg.statusCode} - retry om 30s` });\n    return [null, { payload: 'retry' }];\n}\n\ntry {\n    const result = msg.payload?.RESPONSE?.RESULT?.[0];\n    if (!result) throw new Error('Tomt RESULT i svar');\n\n    const sseUrl = result?.INFO?.SSEURL;\n    if (!sseUrl) throw new Error('Ingen SSEURL i svaret');\n\n    global.set('tv_sse_url', sseUrl);\n    global.set('tv_last_event_id', null);\n    global.set('tv_sse_state', 'connecting');\n\n    const initialTrains = result?.TrainAnnouncement || [];\n    const station = global.get('tv_station') || '?';\n    node.log(`SSE-URL OK. ${initialTrains.length} tåg i snapshot för idag (${station}).`);\n    node.status({ fill: 'blue', shape: 'dot', text: `SSE-URL OK - ${initialTrains.length} tåg idag` });\n\n    return [{ payload: { url: sseUrl } }, null];\n\n} catch (err) {\n    node.error('Parsfel: ' + err.message);\n    node.status({ fill: 'red', shape: 'ring', text: 'Parsfel - retry om 30s' });\n    return [null, { payload: 'retry' }];\n}",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 960,
+        "y": 40,
+        "wires": [
+            [
+                "tv_eventsource"
+            ],
+            [
+                "tv_http_retry_delay"
+            ]
+        ]
+    },
+    {
+        "id": "tv_http_retry_delay",
+        "type": "delay",
+        "z": "tv_tab",
+        "name": "Vänta 30s (HTTP retry)",
+        "pauseType": "delay",
+        "timeout": "30",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 600,
+        "y": 120,
+        "wires": [
+            [
+                "tv_build_request"
+            ]
+        ]
+    },
+    {
+        "id": "tv_eventsource",
+        "type": "EventSource",
+        "z": "tv_tab",
+        "name": "SSE: Trafikverket",
+        "url": "",
+        "initDict": "",
+        "x": 130,
+        "y": 260,
+        "wires": [
+            [
+                "tv_parse_sse_data"
+            ],
+            [
+                "tv_on_open"
+            ],
+            [
+                "tv_on_error"
+            ]
+        ]
+    },
+    {
+        "id": "tv_parse_sse_data",
+        "type": "function",
+        "z": "tv_tab",
+        "name": "Tolka SSE JSON",
+        "func": "const rawData = msg.payload?.data;\nif (!rawData) return null;\n\ntry {\n    const parsed = JSON.parse(rawData);\n    const trains = parsed?.RESPONSE?.RESULT?.[0]?.TrainAnnouncement || [];\n    if (trains.length === 0) return null;\n    return trains.map(train => ({ payload: train, topic: 'train_sse_event' }));\n} catch (e) {\n    node.warn('SSE JSON-parsfel: ' + e.message);\n    return null;\n}",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 390,
+        "y": 220,
+        "wires": [
+            [
+                "tv_dedup_filter"
+            ]
+        ]
+    },
+    {
+        "id": "tv_on_open",
+        "type": "function",
+        "z": "tv_tab",
+        "name": "onopen",
+        "func": "global.set('tv_sse_state', 'connected');\nglobal.set('tv_error_count', 0);\nconst station = global.get('tv_station') || '?';\nnode.status({ fill: 'green', shape: 'dot', text: `SSE ansluten (${station})` });\nnode.log('SSE onopen - anslutning etablerad');\nreturn null;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 260,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "tv_on_error",
+        "type": "function",
+        "z": "tv_tab",
+        "name": "onerror - felhantering",
+        "func": "const errorCount = (global.get('tv_error_count') || 0) + 1;\nglobal.set('tv_error_count', errorCount);\n\nconst readyState = msg.payload?.readyState;\nconst statusCode = msg.payload?.status;\n\nnode.warn(`SSE-fel #${errorCount} | readyState=${readyState} | HTTP=${statusCode || 'n/a'}`);\n\nif (readyState === 2) {\n    node.status({ fill: 'red', shape: 'ring', text: 'SSE dead (state=2) - ny URL om 15s' });\n    global.set('tv_sse_state', 'dead');\n    global.set('tv_error_count', 0);\n    return { payload: 'state2', topic: 'restart' };\n}\n\nif (errorCount > 5) {\n    node.status({ fill: 'yellow', shape: 'ring', text: `${errorCount} fel - ny URL om 15s` });\n    global.set('tv_error_count', 0);\n    global.set('tv_sse_state', 'reconnecting');\n    return { payload: 'threshold', topic: 'restart' };\n}\n\nnode.status({ fill: 'yellow', shape: 'ring', text: `SSE-fel #${errorCount} - återansluter...` });\nglobal.set('tv_sse_state', 'reconnecting');\nreturn null;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 380,
+        "y": 320,
+        "wires": [
+            [
+                "tv_sse_error_delay"
+            ]
+        ]
+    },
+    {
+        "id": "tv_sse_error_delay",
+        "type": "delay",
+        "z": "tv_tab",
+        "name": "Vänta 15s",
+        "pauseType": "delay",
+        "timeout": "15",
+        "timeoutUnits": "seconds",
+        "rate": "1",
+        "nbRateUnits": "1",
+        "rateUnits": "second",
+        "randomFirst": "1",
+        "randomLast": "5",
+        "randomUnits": "seconds",
+        "drop": false,
+        "allowrate": false,
+        "outputs": 1,
+        "x": 580,
+        "y": 320,
+        "wires": [
+            [
+                "tv_close_and_restart"
+            ]
+        ]
+    },
+    {
+        "id": "tv_close_and_restart",
+        "type": "function",
+        "z": "tv_tab",
+        "name": "Stäng SSE + hämta ny URL",
+        "func": "node.log('Stänger SSE och hämtar ny URL från Trafikverket');\nreturn [\n    { payload: 'close' },\n    { payload: 'reconnect' }\n];",
+        "outputs": 2,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 820,
+        "y": 320,
+        "wires": [
+            [
+                "tv_eventsource"
+            ],
+            [
+                "tv_build_request"
+            ]
+        ]
+    },
+    {
+        "id": "tv_dedup_filter",
+        "type": "function",
+        "z": "tv_tab",
+        "name": "Dedup + filter",
+        "func": "const train = msg.payload;\n\nif (!train || train.ActivityType !== 'Ankomst') return null;\n\nif (train.Canceled === true) {\n    node.log(`Tåg ${train.AdvertisedTrainIdent} är inställt - ignoreras`);\n    return null;\n}\n\n// Trigga endast när tåget faktiskt ankommit (TimeAtLocation satt av Trafikverket)\n// Utan detta triggar förseningsnotiser också, vilket är felaktigt\nif (!train.TimeAtLocation) {\n    node.log(`Tåg ${train.AdvertisedTrainIdent} har inte ankommit (TimeAtLocation saknas) - ignoreras`);\n    return null;\n}\n\nconst dateStr   = new Date().toISOString().split('T')[0];\nconst dedupeKey = `${train.AdvertisedTrainIdent}_${train.AdvertisedTimeAtLocation}_${dateStr}`;\n\nconst seenTrains = global.get('tv_seen_trains') || {};\nif (seenTrains[dedupeKey]) {\n    node.log(`Tåg ${train.AdvertisedTrainIdent} redan triggat (dedup) - ignoreras`);\n    return null;\n}\n\nseenTrains[dedupeKey] = { triggeredAt: Date.now(), trainId: train.AdvertisedTrainIdent };\nglobal.set('tv_seen_trains', seenTrains);\n\nconst delayed = train.EstimatedTimeAtLocation &&\n    train.EstimatedTimeAtLocation !== train.AdvertisedTimeAtLocation;\n\nmsg.payload = {\n    tag:         train.AdvertisedTrainIdent,\n    spar:        train.TrackAtLocation           || 'okänt',\n    planerad:    train.AdvertisedTimeAtLocation,\n    beraknad:    train.EstimatedTimeAtLocation    || null,\n    faktisk:     train.TimeAtLocation,\n    forsenat:    delayed,\n    fran:        train.FromLocation?.[0]?.LocationName || 'okänt',\n    till:        train.ToLocation?.[0]?.LocationName   || 'okänt',\n    station:     train.LocationSignature,\n    tidsstampel: new Date().toISOString()\n};\nmsg.topic = 'train_arrival';\n\nnode.status({\n    fill: 'green', shape: 'dot',\n    text: `Tåg ${train.AdvertisedTrainIdent} spår ${train.TrackAtLocation || '?'}${delayed ? ' (försenat)' : ''}`\n});\n\nreturn msg;",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 580,
+        "y": 220,
+        "wires": [
+            [
+                "tv_debug_arrival"
+            ]
+        ]
+    },
+    {
+        "id": "tv_debug_arrival",
+        "type": "debug",
+        "z": "tv_tab",
+        "name": "Tåg ankommet",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": true,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "payload.tag",
+        "statusType": "msg",
+        "x": 760,
+        "y": 220,
+        "wires": []
+    },
+    {
+        "id": "tv_comment_dmx",
+        "type": "comment",
+        "z": "tv_tab",
+        "name": "Koppla in DMX-logik här (ljuscue vid tågankomst)",
+        "info": "Ett meddelande kommer hit varje gång ett tåg har ankommit.\nKoppla en egen nod från \"Dedup + filter\" för att starta en ljuscue, till exempel DMX via OLA.\n\nmsg.payload innehåller:\ntag, spar, planerad, beraknad, faktisk, forsenat, fran, till, station, tidsstampel",
+        "x": 850,
+        "y": 270,
+        "wires": []
+    },
+    {
+        "id": "tv_midnight_inject",
+        "type": "inject",
+        "z": "tv_tab",
+        "name": "Midnatt - rensa cache + ny SSE",
+        "props": [
+            {
+                "p": "payload",
+                "v": "midnight",
+                "vt": "str"
+            }
+        ],
+        "repeat": "",
+        "crontab": "1 0 * * *",
+        "once": false,
+        "x": 200,
+        "y": 380,
+        "wires": [
+            [
+                "tv_midnight_fn"
+            ]
+        ]
+    },
+    {
+        "id": "tv_midnight_fn",
+        "type": "function",
+        "z": "tv_tab",
+        "name": "Rensa dedup-cache",
+        "func": "global.set('tv_seen_trains', {});\nglobal.set('tv_last_event_id', null);\nglobal.set('tv_error_count', 0);\nnode.log('Midnatt: dedup-cache rensad, hämtar ny SSE-URL för ny dag');\nnode.status({ fill: 'blue', shape: 'dot', text: 'Midnatt - cache rensad' });\nreturn { payload: 'midnight' };",
+        "outputs": 1,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 460,
+        "y": 380,
+        "wires": [
+            [
+                "tv_close_and_restart"
+            ]
+        ]
+    },
+    {
+        "id": "70d743b2144fbab5",
+        "type": "global-config",
+        "env": [],
+        "modules": {
+            "@parasaurolophus/node-red-eventsource": "3.0.0"
+        }
+    }
+]

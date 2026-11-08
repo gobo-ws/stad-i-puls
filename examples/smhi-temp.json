@@ -4,13 +4,13 @@
         "type": "tab",
         "label": "SMHI Lufttemperatur Norrköping",
         "disabled": false,
-        "info": "By Johan Nilsson, gobo.ws"
+        "info": "Hämtar senaste lufttemperaturen från SMHI:s öppna data (parameter 45, station 86340).\nVärdet skrivs ut med decimalkomma.\nAv Johan Nilsson, gobo.ws"
     },
     {
         "id": "inject_1min",
         "type": "inject",
         "z": "tab_smhi_temp",
-        "name": "Every 60 seconds",
+        "name": "Skicka förfrågan var 60:e sekund",
         "props": [
             {
                 "p": "payload"
@@ -35,7 +35,7 @@
         "id": "http_smhi",
         "type": "http request",
         "z": "tab_smhi_temp",
-        "name": "Fetch SMHI data (param 45, station 86340)",
+        "name": "Hämta SMHI-data (parameter 45, station 86340)",
         "method": "GET",
         "ret": "obj",
         "paytoqs": "ignore",
@@ -59,8 +59,8 @@
         "id": "func_extract",
         "type": "function",
         "z": "tab_smhi_temp",
-        "name": "Extract latest temperature",
-        "func": "const data = msg.payload;\n\nif (!data || !Array.isArray(data.value) || data.value.length === 0) {\n    node.warn(\"No value found in SMHI response\");\n    return null;\n}\n\nconst latest = data.value[data.value.length - 1];\nconst tempC = parseFloat(latest.value);\n\nif (Number.isNaN(tempC)) {\n    node.warn(\"Could not parse temperature value\");\n    return null;\n}\n\nconst previousTimestamp = flow.get(\"lastObservedAtUTC\");\nconst isNewValue = latest.date !== previousTimestamp;\nflow.set(\"lastObservedAtUTC\", latest.date);\n\nconst ageSeconds = Math.round((Date.now() - latest.date) / 1000);\n\nif (!isNewValue && ageSeconds > 150) {\n    node.status({ fill: \"yellow\", shape: \"ring\", text: `stale ${ageSeconds}s` });\n} else {\n    node.status({ fill: \"green\", shape: \"dot\", text: `${ageSeconds}s old` });\n}\n\n\nconst utcDate = new Date(latest.date);\nconst localTime = utcDate.toLocaleString(\"sv-SE\", {\n    timeZone: \"Europe/Stockholm\",\n    year: \"numeric\",\n    month: \"2-digit\",\n    day: \"2-digit\",\n    hour: \"2-digit\",\n    minute: \"2-digit\",\n    second: \"2-digit\"\n});\n\nconst freshness = isNewValue ? \"new\" : \"unchanged\";\n\nmsg.payload = tempC.toFixed(2).replace(\".\", \",\");\nmsg.temperature = parseFloat(tempC.toFixed(2));\nmsg.observedAtUTC = latest.date;\nmsg.observedAtLocal = localTime;\nmsg.isNewValue = isNewValue;\nmsg.ageSeconds = ageSeconds;\nmsg.freshness = freshness;\n\nreturn msg;",
+        "name": "Hämta senaste temperaturen",
+        "func": "const data = msg.payload;\n\nif (!data || !Array.isArray(data.value) || data.value.length === 0) {\n    node.warn(\"Inget värde i SMHI-svaret\");\n    return null;\n}\n\n// Senaste mätvärdet ligger sist i listan\nconst latest = data.value[data.value.length - 1];\nconst tempC = parseFloat(latest.value);\n\nif (Number.isNaN(tempC)) {\n    node.warn(\"Kunde inte tolka temperaturvärdet\");\n    return null;\n}\n\n// Är det en ny mätning sedan förra anropet?\nconst previousTimestamp = flow.get(\"lastObservedAtUTC\");\nconst isNewValue = latest.date !== previousTimestamp;\nflow.set(\"lastObservedAtUTC\", latest.date);\n\nconst ageSeconds = Math.round((Date.now() - latest.date) / 1000);\n\nif (!isNewValue && ageSeconds > 150) {\n    node.status({ fill: \"yellow\", shape: \"ring\", text: `inaktuellt, ${ageSeconds} s` });\n} else {\n    node.status({ fill: \"green\", shape: \"dot\", text: `${ageSeconds} s gammalt` });\n}\n\n// Tidpunkten i svensk tid\nconst utcDate = new Date(latest.date);\nconst localTime = utcDate.toLocaleString(\"sv-SE\", {\n    timeZone: \"Europe/Stockholm\",\n    year: \"numeric\",\n    month: \"2-digit\",\n    day: \"2-digit\",\n    hour: \"2-digit\",\n    minute: \"2-digit\",\n    second: \"2-digit\"\n});\n\nconst freshness = isNewValue ? \"nytt\" : \"oförändrat\";\n\n// payload med decimalkomma, temperature som tal för vidare beräkningar\nmsg.payload = tempC.toFixed(2).replace(\".\", \",\");\nmsg.temperature = parseFloat(tempC.toFixed(2));\nmsg.observedAtUTC = latest.date;\nmsg.observedAtLocal = localTime;\nmsg.isNewValue = isNewValue;\nmsg.ageSeconds = ageSeconds;\nmsg.freshness = freshness;\n\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -79,7 +79,7 @@
         "id": "debug_temp",
         "type": "debug",
         "z": "tab_smhi_temp",
-        "name": "Latest temperature",
+        "name": "Senaste temperatur",
         "active": true,
         "tosidebar": true,
         "console": false,
