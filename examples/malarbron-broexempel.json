@@ -4,7 +4,7 @@
         "type": "tab",
         "label": "Broöppning Mälarbron",
         "disabled": false,
-        "info": "Anropar Södertälje kommuns API för att hämta status för broöppning på Mälarbron.\r\nAv Johan Nilsson, gobo.ws"
+        "info": "Hämtar status för broöppning på Mälarbron från Södertälje kommuns API.\nstate 1 betyder att en broöppning pågår, 0 att bron är stängd.\nAv Johan Nilsson, gobo.ws"
     },
     {
         "id": "c7feb81fd34c18cd",
@@ -154,6 +154,16 @@
         "statusType": "auto",
         "x": 970,
         "y": 80,
+        "wires": []
+    },
+    {
+        "id": "9d3f1b7a5c2e4408",
+        "type": "comment",
+        "z": "e6280b723003cbfc",
+        "name": "Koppla in DMX-logik här (ljuscue när bron öppnas)",
+        "info": "Ett meddelande kommer hit varje gång statusen är 1, alltså när en broöppning pågår.\nKoppla en egen nod härifrån för att starta en ljuscue, till exempel DMX via OLA.",
+        "x": 1080,
+        "y": 120,
         "wires": []
     }
 ]
