@@ -1,0 +1,95 @@
+[
+    {
+        "id": "tab_smhi_temp",
+        "type": "tab",
+        "label": "SMHI Lufttemperatur Norrköping",
+        "disabled": false,
+        "info": "By Johan Nilsson, gobo.ws"
+    },
+    {
+        "id": "inject_1min",
+        "type": "inject",
+        "z": "tab_smhi_temp",
+        "name": "Every 60 seconds",
+        "props": [
+            {
+                "p": "payload"
+            }
+        ],
+        "repeat": "60",
+        "crontab": "",
+        "once": true,
+        "onceDelay": 0.1,
+        "topic": "",
+        "payload": "",
+        "payloadType": "date",
+        "x": 150,
+        "y": 40,
+        "wires": [
+            [
+                "http_smhi"
+            ]
+        ]
+    },
+    {
+        "id": "http_smhi",
+        "type": "http request",
+        "z": "tab_smhi_temp",
+        "name": "Fetch SMHI data (param 45, station 86340)",
+        "method": "GET",
+        "ret": "obj",
+        "paytoqs": "ignore",
+        "url": "https://opendata-download-metobs.smhi.se/api/version/1.0/parameter/45/station/86340/period/latest-hour/data.json",
+        "tls": "",
+        "persist": false,
+        "proxy": "",
+        "insecureHTTPParser": false,
+        "authType": "",
+        "senderr": false,
+        "headers": [],
+        "x": 430,
+        "y": 40,
+        "wires": [
+            [
+                "func_extract"
+            ]
+        ]
+    },
+    {
+        "id": "func_extract",
+        "type": "function",
+        "z": "tab_smhi_temp",
+        "name": "Extract latest temperature",
+        "func": "const data = msg.payload;\n\nif (!data || !Array.isArray(data.value) || data.value.length === 0) {\n    node.warn(\"No value found in SMHI response\");\n    return null;\n}\n\nconst latest = data.value[data.value.length - 1];\nconst tempC = parseFloat(latest.value);\n\nif (Number.isNaN(tempC)) {\n    node.warn(\"Could not parse temperature value\");\n    return null;\n}\n\nconst previousTimestamp = flow.get(\"lastObservedAtUTC\");\nconst isNewValue = latest.date !== previousTimestamp;\nflow.set(\"lastObservedAtUTC\", latest.date);\n\nconst ageSeconds = Math.round((Date.now() - latest.date) / 1000);\n\nif (!isNewValue && ageSeconds > 150) {\n    node.status({ fill: \"yellow\", shape: \"ring\", text: `stale ${ageSeconds}s` });\n} else {\n    node.status({ fill: \"green\", shape: \"dot\", text: `${ageSeconds}s old` });\n}\n\n\nconst utcDate = new Date(latest.date);\nconst localTime = utcDate.toLocaleString(\"sv-SE\", {\n    timeZone: \"Europe/Stockholm\",\n    year: \"numeric\",\n    month: \"2-digit\",\n    day: \"2-digit\",\n    hour: \"2-digit\",\n    minute: \"2-digit\",\n    second: \"2-digit\"\n});\n\nconst freshness = isNewValue ? \"new\" : \"unchanged\";\n\nmsg.payload = tempC.toFixed(2).replace(\".\", \",\");\nmsg.temperature = parseFloat(tempC.toFixed(2));\nmsg.observedAtUTC = latest.date;\nmsg.observedAtLocal = localTime;\nmsg.isNewValue = isNewValue;\nmsg.ageSeconds = ageSeconds;\nmsg.freshness = freshness;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 730,
+        "y": 40,
+        "wires": [
+            [
+                "debug_temp"
+            ]
+        ]
+    },
+    {
+        "id": "debug_temp",
+        "type": "debug",
+        "z": "tab_smhi_temp",
+        "name": "Latest temperature",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "payload",
+        "targetType": "msg",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 730,
+        "y": 120,
+        "wires": []
+    }
+]
